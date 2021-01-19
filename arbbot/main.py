@@ -5,6 +5,7 @@ import json
 import re
 import os
 import sys
+from math import ceil
 
 with open("config.json") as f:
     config = json.load(f)
@@ -36,7 +37,7 @@ async def on_command_error(ctx, error):
         await ctx.send("You do not have the appropriate permissions to run this command.", delete_after = 2)
 
 
-@client.command()
+@client.command(aliases=["p"])
 @commands.has_role(f"{commandRole}")
 async def points(ctx, operation, member: discord.Member, value):
     memberID = member.id
@@ -133,22 +134,58 @@ async def nick(ctx):
     newnick = changeNick(member, nickname)
     await member.edit(nick=newnick)
 
-@client.command()
-async def balance(ctx):
-    memberID = ctx.message.author.id
+@client.command(aliases=['bal'])
+async def balance(ctx, member: discord.Member = None):
+    if member is None:
+        memberID = ctx.message.author.id
+    else:
+        memberID = member.id
+    
     db = sqlite3.connect('pointdata.sqlite')
     cursor = db.cursor()
     cursor.execute(f"SELECT points FROM pointdata WHERE member = {memberID}")
     result = cursor.fetchone()
-
-    if result is None:
-        await ctx.send("You have 0 points.")
+    if member is None:
+        if result is None:
+            await ctx.send("You have 0 points.")
+        else:
+            await ctx.send(f"You have {result[0]} points.")
     else:
-        await ctx.send(f"You have {result[0]} points.")
+        if result is None:
+            await ctx.send(f"**{member.name}** has 0 points.")
+        else:
+            await ctx.send(f"**{member.name}** has {result[0]} points.")
     cursor.close()
     db.close()
 
+@client.command(aliases=['lb'],)
+async def leaderboard(ctx, page = 1):
+    db = sqlite3.connect("pointdata.sqlite")
+    db.row_factory = sqlite3.Row
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM pointdata ORDER BY points DESC")
+    result = cursor.fetchall()
 
+    entryAmt = len(result)
+    pageAmt = ceil(entryAmt/10)
+    if page != 1:
+        cursor.execute(f"SELECT * FROM pointdata ORDER BY points DESC limit {10*page-10}, 10")
+    elif page <= pageAmt:
+        cursor.execute(f"SELECT * FROM pointdata ORDER BY points DESC limit 10")
+    else:
+        await ctx.send("This page doesn't exist (yet)!")
+        return
+    result = [dict(row) for row in cursor.fetchall()]
+
+    lbtext = '```'
+    i = (page*10-10)
+    for d in result:
+        i+=1
+        member = await client.fetch_user(d['member'])
+        lbtext += (f"{i}. {member.name}: {d['points']}\n\n")
+    lbtext += '```'
+    await ctx.send(f"{lbtext}Page **{page}** of **{pageAmt}**.")
+    
 
 @client.command(pass_context = True)
 async def help(ctx):
@@ -159,6 +196,7 @@ async def help(ctx):
     embed.add_field(name='!help', value = 'Shows this message.', inline = False)
     embed.add_field(name='!nick', value = 'Toggles the point nicknames.', inline = False)
     embed.add_field(name='!balance', value = 'Tells you how many points you have.', inline = False)
+    embed.add_field(name='!leaderboard', value = '!lb <page>. Shows the current points leaderboard.', inline = False)
     embed.add_field(name='!points', value = 'Admin only: !points <add|remove> <user> <amount>', inline = False)
     embed.add_field(name='!sql', value = 'Admin only: Direct database manipulation. USE WITH CAUTION!', inline = False)
     embed.add_field(name='!prefix', value = 'Admin only: !prefix <new prefix>', inline = False)
@@ -167,7 +205,6 @@ async def help(ctx):
 
     await ctx.send(embed=embed)
     
-
 
 def registerUser(memberID, value, operation = None):
     if operation == "add":
